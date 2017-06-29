@@ -1,42 +1,68 @@
-#!/bin/bash -e
+#!/usr/bin/env bash
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+prog=$0
+PYPI_INDEX_URL=http://devpi/pi/
 
-main() {
-    cd "$root"
-
-    create_env
-    install_packages
+show_usage() {
+    echo "Invalid arguments"
+    echo "Usage: ${prog} [--npm-install] [--skip-python]"
+    exit 1
 }
 
-create_env() {
-    if [[ -d env ]]; then
-        return
+exit_npm_install () {
+    mv release.json package.json
+    exit 1
+}
+
+die() {
+    echo "$@"
+    exit 1
+}
+
+while (( "$#" )); do
+
+    case "$1" in
+        --npm)
+            skip_python=1
+            ;&
+        --npm-install)
+            npm_install=1
+            ;;
+        --latest-tulsa-bundle)
+            latest_tulsa_bundle=1
+            ;;
+        --skip-python)
+            skip_python=1
+            ;;
+        *)
+            show_usage
+            ;;
+    esac
+
+shift
+
+done
+
+if [ "$skip_python" != "1" ]; then
+
+    if [ ! -d "env" ]; then
+        scl enable python27 "virtualenv env --system-site-packages"
+        scl enable python27 "scl_patch_virtualenv env"
     fi
 
-    scl enable python27 "
-        /opt/rh/python27/root/usr/bin/virtualenv env --system-site-packages
-        virtualenv env --system-site-packages
-        scl_patch_virtualenv env
-    "
-
     ln -sf env/bin/activate
-}
+    . ./activate
 
-pip_install() {
-    pip install -U "$@" 2>&1 |
-    grep -v 'DEPRECATION: Failed to find'
-}
+    # upgrade pip
+    pip install --upgrade -i $PYPI_INDEX_URL pip
 
-upgrade_pip() {
-    pip_install -U 'pip==8.1.1'
-    pip_install -U 'setuptools==34.3.2'
-}
+    # Install wheel
+    pip install --upgrade -i $PYPI_INDEX_URL wheel --trusted-host devpi \
+        || die "Could not install wheel from pypi! Cannot continue"
 
-install_packages() {
-    . "$root/activate"
-    upgrade_pip
-    pip_install -r "requirements.txt"
-}
+    # install from devpi for public pacakges, this makes switch versions easier
+    pip install --upgrade --no-binary simplejson,django-jenkins,coverage,configparser,mintel-ppt-client2 -i $PYPI_INDEX_URL -r requirements.txt --trusted-host devpi \
+        || die "Could not install python packages from devpi! Cannot continue"
 
-main "$@"
+fi
+
